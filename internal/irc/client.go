@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,17 +45,22 @@ func New(cfg config.IRCConfig, logger zerolog.Logger) *Client {
 	// Configure girc client
 	ircCfg := girc.Config{
 		Server: cfg.Server,
-		Port:   6667, // Default, will be overridden if specified in Server
+		Port:   6667, // Default port
 		Nick:   cfg.Nickname,
 		User:   cfg.Username,
 		Name:   cfg.Realname,
 	}
 
-	// Parse server and port
+	// Parse server and port if provided in "host:port" format
 	if strings.Contains(cfg.Server, ":") {
 		parts := strings.Split(cfg.Server, ":")
 		ircCfg.Server = parts[0]
-		// Port will be auto-detected from Server field by girc
+		if len(parts) > 1 {
+			// Parse port from string
+			if port, err := strconv.Atoi(parts[1]); err == nil {
+				ircCfg.Port = port
+			}
+		}
 	}
 
 	// TLS configuration
@@ -83,9 +89,13 @@ func (c *Client) Connect(ctx context.Context) error {
 	errChan := make(chan error, 1)
 	go func() {
 		if err := c.client.Connect(); err != nil {
+			c.logger.Error().Err(err).Msg("IRC connect error")
 			errChan <- err
 		}
 	}()
+
+	// Wait for connection with a reasonable timeout
+	timeout := time.After(30 * time.Second)
 
 	// Wait for connection or context cancellation
 	select {
@@ -94,6 +104,9 @@ func (c *Client) Connect(ctx context.Context) error {
 	case <-c.ready:
 		c.logger.Info().Msg("connected to IRC server")
 		return nil
+	case <-timeout:
+		c.client.Close()
+		return fmt.Errorf("IRC connection timeout")
 	case <-ctx.Done():
 		c.client.Close()
 		return ctx.Err()

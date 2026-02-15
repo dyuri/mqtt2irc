@@ -13,7 +13,18 @@
       "Bash(wc:*)",
       "Bash(IMPLEMENTATION_SUMMARY.md:*)",
       "Bash(make clean:*)",
-      "Bash(make build:*)"
+      "Bash(make build:*)",
+      "Bash(docker-compose down:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker compose:*)",
+      "Bash(curl:*)",
+      "Bash(docker exec:*)",
+      "Bash(pkill:*)",
+      "Bash(pgrep:*)",
+      "Bash(timeout 5 bash -c 'exec 3<>/dev/tcp/localhost/6667 && echo -e \"\"NICK testbot\\\\r\\\\nUSER testbot 0 * :Test Bot\\\\r\\\\n\"\" >&3 && head -5 <&3')",
+      "Bash(xargs kill:*)",
+      "Bash(timeout 30 ./test-irc:*)",
+      "Bash(go run:*)"
     ]
   }
 }

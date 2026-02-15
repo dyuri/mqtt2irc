@@ -17,7 +17,7 @@ mqtt:
 irc:
   server: "localhost:6667"
   use_tls: false
-  nickname: "mqtt2irc_bot"
+  nickname: "mqtt2irc"
   username: "mqtt2irc"
   realname: "MQTT to IRC Bridge (Test)"
   nickserv_password: ""
