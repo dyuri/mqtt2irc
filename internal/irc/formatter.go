@@ -2,6 +2,7 @@ package irc
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"text/template"
 	"unicode/utf8"
@@ -26,7 +27,7 @@ func FormatMessage(msg types.Message, templateStr string, maxLength int, truncat
 	// Template data
 	data := map[string]interface{}{
 		"Topic":   msg.Topic,
-		"Payload": string(msg.Payload),
+		"Payload": payloadString(msg.Payload),
 		"QoS":     msg.QoS,
 	}
 
@@ -46,9 +47,18 @@ func FormatMessage(msg types.Message, templateStr string, maxLength int, truncat
 	return result, nil
 }
 
+// payloadString converts a payload to a display string.
+// If the payload is not valid UTF-8 (i.e. binary), returns a descriptive placeholder.
+func payloadString(payload []byte) string {
+	if !utf8.Valid(payload) {
+		return fmt.Sprintf("[binary data, %d bytes]", len(payload))
+	}
+	return string(payload)
+}
+
 // formatSimple creates a simple formatted message
 func formatSimple(msg types.Message, maxLength int, truncateSuffix string) string {
-	result := "[" + msg.Topic + "] " + string(msg.Payload)
+	result := "[" + msg.Topic + "] " + payloadString(msg.Payload)
 	result = sanitize(result)
 	result = truncate(result, maxLength, truncateSuffix)
 	return result

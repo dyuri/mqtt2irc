@@ -33,6 +33,10 @@ Thumbs.db
 # Logs
 *.log
 
+# Environment files
+.env
+/env/
+
 # Build artifacts
 /bin/
 /dist/

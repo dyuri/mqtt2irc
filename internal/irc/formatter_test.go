@@ -66,6 +66,30 @@ func TestFormatMessage(t *testing.T) {
 	}
 }
 
+func TestPayloadString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []byte
+		expected string
+	}{
+		{"valid utf8", []byte("hello"), "hello"},
+		{"empty", []byte{}, ""},
+		{"valid utf8 multibyte", []byte("hello 世界"), "hello 世界"},
+		{"binary single byte", []byte{0xFF}, "[binary data, 1 bytes]"},
+		{"binary multi byte", []byte{0x89, 0x50, 0x4E, 0x47}, "[binary data, 4 bytes]"},
+		{"invalid utf8 sequence", []byte{0xc3, 0x28}, "[binary data, 2 bytes]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := payloadString(tt.input)
+			if result != tt.expected {
+				t.Errorf("payloadString(%v) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestSanitize(t *testing.T) {
 	tests := []struct {
 		name     string

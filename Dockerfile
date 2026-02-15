@@ -37,7 +37,11 @@ COPY --from=builder /app/mqtt2irc .
 COPY configs/config.example.yaml /etc/mqtt2irc/config.example.yaml
 
 # Change ownership
-RUN chown -R mqtt2irc:mqtt2irc /app
+RUN chown -R mqtt2irc:mqtt2irc /app && \
+    chown -R mqtt2irc:mqtt2irc /etc/mqtt2irc
+
+# Declare config directory as a volume for host-mounting
+VOLUME ["/etc/mqtt2irc"]
 
 # Switch to non-root user
 USER mqtt2irc
