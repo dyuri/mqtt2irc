@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # MQTT Broker (Eclipse Mosquitto)
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mqtt2irc-mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./test/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - mqtt2irc-net
+
+  # IRC Server (ngIRCd)
+  ngircd:
+    image: linuxserver/ngircd:latest
+    container_name: mqtt2irc-ngircd
+    ports:
+      - "6667:6667"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    networks:
+      - mqtt2irc-net
+
+  # MQTT Publisher (for testing)
+  mqtt-publisher:
+    image: eclipse-mosquitto:2
+    container_name: mqtt2irc-publisher
+    depends_on:
+      - mosquitto
+    networks:
+      - mqtt2irc-net
+    entrypoint: /bin/sh
+    command: |
+      -c "
+      echo 'Waiting for mosquitto...'
+      sleep 5
+      echo 'Publishing test messages...'
+      while true; do
+        mosquitto_pub -h mosquitto -t 'sensors/temperature/bedroom' -m '$$(date +%T) - 23.5°C'
+        mosquitto_pub -h mosquitto -t 'sensors/humidity/bedroom' -m '$$(date +%T) - 45%'
+        mosquitto_pub -h mosquitto -t 'alerts/critical' -m 'Test alert at $$(date +%T)'
+        sleep 10
+      done
+      "
+
+networks:
+  mqtt2irc-net:
+    driver: bridge

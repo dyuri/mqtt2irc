@@ -1,0 +1,98 @@
+# MQTT-to-IRC Bridge Configuration Example
+# Copy this file to config.yaml and adjust for your environment
+
+mqtt:
+  # MQTT broker URL (tcp:// for plain, ssl:// or tls:// for TLS)
+  broker: "tcp://mqtt.example.com:1883"
+  # broker: "ssl://mqtt.example.com:8883"  # For TLS
+
+  # Unique client ID for this bridge instance
+  client_id: "mqtt2irc_bot"
+
+  # MQTT authentication (optional)
+  username: "mqtt_user"
+  password: "mqtt_password"
+
+  # Use TLS for MQTT connection
+  use_tls: false
+
+  # Default QoS for subscriptions (0, 1, or 2)
+  qos: 1
+
+  # Topics to subscribe to
+  topics:
+    - pattern: "sensors/temperature/#"
+      qos: 1
+    - pattern: "sensors/humidity/+"
+      qos: 1
+    - pattern: "alerts/critical"
+      qos: 2
+
+irc:
+  # IRC server address (host:port)
+  server: "irc.libera.chat:6697"
+
+  # Use TLS for IRC connection
+  use_tls: true
+
+  # Bot identity
+  nickname: "mqtt2irc"
+  username: "mqtt2irc"
+  realname: "MQTT to IRC Bridge Bot"
+
+  # NickServ password (optional, for registered nicks)
+  nickserv_password: ""
+
+  # Rate limiting to prevent flood kicks
+  rate_limit:
+    messages_per_second: 2
+    burst: 5
+
+bridge:
+  # Topic to channel mappings
+  mappings:
+    # Simple 1:1 mapping
+    - mqtt_topic: "sensors/temperature/#"
+      irc_channels:
+        - "#iot-sensors"
+      message_format: "[{{.Topic}}] {{.Payload}}"
+
+    # Wildcard mapping with custom format
+    - mqtt_topic: "sensors/humidity/+"
+      irc_channels:
+        - "#iot-sensors"
+      message_format: "Humidity {{.Payload}}"
+
+    # Multiple channels with alert formatting
+    - mqtt_topic: "alerts/critical"
+      irc_channels:
+        - "#alerts"
+        - "#ops"
+      message_format: "ALERT: {{.Payload}}"
+
+  # Message queue configuration
+  queue:
+    max_size: 1000
+    block_on_full: false  # Drop messages if queue is full
+
+  # IRC message length limit (IRC protocol max is ~512 bytes)
+  max_message_length: 400
+  truncate_suffix: "..."
+
+logging:
+  # Log level: trace, debug, info, warn, error, fatal, panic
+  level: "info"
+
+  # Format: json or console
+  format: "console"
+
+health:
+  # Enable HTTP health check endpoints
+  enabled: true
+
+  # Port for health check server
+  port: 8080
+
+  # Endpoints:
+  # - GET /health - Returns JSON with connection status
+  # - GET /ready - Returns 200 if ready, 503 if not (for K8s)

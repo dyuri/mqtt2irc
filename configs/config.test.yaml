@@ -1,0 +1,63 @@
+# Test configuration for local development
+# Use with docker-compose for local testing
+
+mqtt:
+  broker: "tcp://localhost:1883"
+  client_id: "mqtt2irc_test"
+  username: ""
+  password: ""
+  use_tls: false
+  qos: 1
+  topics:
+    - pattern: "sensors/#"
+      qos: 1
+    - pattern: "alerts/#"
+      qos: 2
+
+irc:
+  server: "localhost:6667"
+  use_tls: false
+  nickname: "mqtt2irc_bot"
+  username: "mqtt2irc"
+  realname: "MQTT to IRC Bridge (Test)"
+  nickserv_password: ""
+  rate_limit:
+    messages_per_second: 2
+    burst: 5
+
+bridge:
+  mappings:
+    - mqtt_topic: "sensors/temperature/#"
+      irc_channels:
+        - "#sensors"
+      message_format: "🌡️  {{.Payload}}"
+
+    - mqtt_topic: "sensors/humidity/#"
+      irc_channels:
+        - "#sensors"
+      message_format: "💧 {{.Payload}}"
+
+    - mqtt_topic: "alerts/#"
+      irc_channels:
+        - "#alerts"
+      message_format: "🚨 {{.Payload}}"
+
+    - mqtt_topic: "sensors/#"
+      irc_channels:
+        - "#monitoring"
+      message_format: "[{{.Topic}}] {{.Payload}}"
+
+  queue:
+    max_size: 100
+    block_on_full: false
+
+  max_message_length: 400
+  truncate_suffix: "..."
+
+logging:
+  level: "debug"
+  format: "console"
+
+health:
+  enabled: true
+  port: 8080

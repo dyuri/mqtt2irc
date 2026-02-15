@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(go mod init:*)",
+      "Bash(go get:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go build:*)",
+      "Bash(./mqtt2irc:*)",
+      "Bash(go test:*)",
+      "Bash(make help:*)",
+      "Bash(make test)",
+      "Bash(wc:*)",
+      "Bash(IMPLEMENTATION_SUMMARY.md:*)",
+      "Bash(make clean:*)",
+      "Bash(make build:*)"
+    ]
+  }
+}

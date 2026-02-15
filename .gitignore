@@ -1,0 +1,38 @@
+# Binaries
+mqtt2irc
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+*.out
+
+# Go workspace
+/vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Config with secrets
+configs/config.yaml
+configs/config.toml
+*.local.yaml
+*.local.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build artifacts
+/bin/
+/dist/
