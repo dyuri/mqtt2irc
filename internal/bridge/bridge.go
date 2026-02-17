@@ -113,6 +113,24 @@ func (b *Bridge) handleMessage(ctx context.Context, msg types.Message) {
 		Int("mappings", len(mappings)).
 		Msg("processing message")
 
+	// Debug: log payload and JSON parsing result
+	if b.logger.GetLevel() <= zerolog.DebugLevel {
+		jsonData := irc.ParseJSON(msg.Payload)
+		ev := b.logger.Debug().
+			Str("topic", msg.Topic).
+			Str("payload", string(msg.Payload))
+		if jsonData == nil {
+			ev.Bool("json_parsed", false)
+		} else {
+			keys := make([]string, 0, len(jsonData))
+			for k := range jsonData {
+				keys = append(keys, k)
+			}
+			ev.Bool("json_parsed", true).Strs("json_keys", keys)
+		}
+		ev.Msg("message payload")
+	}
+
 	// Send to all matched channels
 	for _, mapping := range mappings {
 		// Format message

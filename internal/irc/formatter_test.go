@@ -9,15 +9,9 @@ import (
 )
 
 func TestFormatMessage(t *testing.T) {
-	msg := types.Message{
-		Topic:     "sensors/temp",
-		Payload:   []byte("25.5"),
-		Timestamp: time.Now(),
-		QoS:       1,
-	}
-
 	tests := []struct {
 		name           string
+		msg            types.Message
 		template       string
 		maxLength      int
 		truncateSuffix string
@@ -25,6 +19,7 @@ func TestFormatMessage(t *testing.T) {
 	}{
 		{
 			name:           "default template",
+			msg:            types.Message{Topic: "sensors/temp", Payload: []byte("25.5"), QoS: 1},
 			template:       "",
 			maxLength:      100,
 			truncateSuffix: "...",
@@ -32,6 +27,7 @@ func TestFormatMessage(t *testing.T) {
 		},
 		{
 			name:           "custom template",
+			msg:            types.Message{Topic: "sensors/temp", Payload: []byte("25.5"), QoS: 1},
 			template:       "{{.Topic}}: {{.Payload}}",
 			maxLength:      100,
 			truncateSuffix: "...",
@@ -39,6 +35,7 @@ func TestFormatMessage(t *testing.T) {
 		},
 		{
 			name:           "template with QoS",
+			msg:            types.Message{Topic: "sensors/temp", Payload: []byte("25.5"), QoS: 1},
 			template:       "[QoS{{.QoS}}] {{.Payload}}",
 			maxLength:      100,
 			truncateSuffix: "...",
@@ -46,21 +43,97 @@ func TestFormatMessage(t *testing.T) {
 		},
 		{
 			name:           "truncation",
+			msg:            types.Message{Topic: "sensors/temp", Payload: []byte("25.5"), QoS: 1},
 			template:       "{{.Payload}}",
 			maxLength:      3,
 			truncateSuffix: "...",
 			expected:       "...",
 		},
+		{
+			name:           "json field access",
+			msg:            types.Message{Topic: "sensors/env", Payload: []byte(`{"temp":22.5,"unit":"C"}`), QoS: 1},
+			template:       "{{.Topic}}: temp={{.JSON.temp}}{{.JSON.unit}}",
+			maxLength:      100,
+			truncateSuffix: "...",
+			expected:       "sensors/env: temp=22.5C",
+		},
+		{
+			name:           "json missing field returns empty",
+			msg:            types.Message{Topic: "sensors/env", Payload: []byte(`{"temp":22.5}`), QoS: 1},
+			template:       "{{.JSON.temp}} {{.JSON.missing}}",
+			maxLength:      100,
+			truncateSuffix: "...",
+			expected:       "22.5",
+		},
+		{
+			name:           "non-json payload JSON is nil",
+			msg:            types.Message{Topic: "sensors/temp", Payload: []byte("25.5"), QoS: 1},
+			template:       "{{.Payload}}",
+			maxLength:      100,
+			truncateSuffix: "...",
+			expected:       "25.5",
+		},
+		{
+			name:           "binary payload",
+			msg:            types.Message{Topic: "sensors/raw", Payload: []byte{0x89, 0x50, 0x4E, 0x47}, QoS: 1},
+			template:       "{{.Topic}}: {{.Payload}}",
+			maxLength:      100,
+			truncateSuffix: "...",
+			expected:       "sensors/raw: [binary data, 4 bytes]",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := FormatMessage(msg, tt.template, tt.maxLength, tt.truncateSuffix)
+			tt.msg.Timestamp = time.Now()
+			result, err := FormatMessage(tt.msg, tt.template, tt.maxLength, tt.truncateSuffix)
 			if err != nil {
 				t.Errorf("FormatMessage() error = %v", err)
 			}
 			if result != tt.expected {
 				t.Errorf("FormatMessage() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []byte
+		wantNil bool
+		wantKey string
+		wantVal string
+	}{
+		{"valid object", []byte(`{"temp":22.5,"unit":"C"}`), false, "temp", "22.5"},
+		{"nested object", []byte(`{"device":{"name":"sensor1"}}`), false, "device", "map[name:sensor1]"},
+		{"array", []byte(`[1,2,3]`), true, "", ""},
+		{"scalar string", []byte(`"hello"`), true, "", ""},
+		{"scalar number", []byte(`42`), true, "", ""},
+		{"invalid json", []byte(`not json`), true, "", ""},
+		{"empty", []byte{}, true, "", ""},
+		{"binary", []byte{0xFF, 0xFE}, true, "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseJSON(tt.input)
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("parseJSON() = %v, want nil", result)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatal("parseJSON() = nil, want non-nil")
+			}
+			if tt.wantKey != "" {
+				val, ok := result[tt.wantKey]
+				if !ok {
+					t.Errorf("parseJSON() missing key %q", tt.wantKey)
+				} else if val != tt.wantVal {
+					t.Errorf("parseJSON()[%q] = %q, want %q", tt.wantKey, val, tt.wantVal)
+				}
 			}
 		})
 	}

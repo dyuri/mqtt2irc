@@ -7,6 +7,8 @@ A lightweight, reliable bridge that forwards messages from MQTT topics to IRC ch
 - **Flexible Topic Mapping**: Map MQTT topics to IRC channels with wildcard support (`+` and `#`)
 - **Multiple Targets**: Forward a single MQTT topic to multiple IRC channels
 - **Message Formatting**: Customizable message templates using Go templates
+- **JSON Payload Support**: Automatically parses JSON payloads — access individual fields with `{{.JSON.fieldname}}`
+- **Binary Payload Safety**: Binary (non-UTF-8) payloads are displayed as `[binary data, N bytes]` instead of garbled output
 - **Rate Limiting**: Built-in token bucket rate limiter to prevent IRC flood kicks
 - **Auto-Reconnection**: Automatic reconnection to both MQTT and IRC with exponential backoff
 - **TLS Support**: Secure connections for both MQTT and IRC
@@ -146,15 +148,27 @@ bridge:
 
 Templates use Go's `text/template` syntax with the following fields:
 - `{{.Topic}}` - MQTT topic name
-- `{{.Payload}}` - Message payload as string
+- `{{.Payload}}` - Message payload as string (binary payloads shown as `[binary data, N bytes]`)
 - `{{.QoS}}` - MQTT QoS level (0, 1, or 2)
+- `{{.JSON.fieldname}}` - Individual field from a JSON object payload (empty string if field missing or payload is not JSON)
 
 Examples:
 ```yaml
+# Plain text payload
 message_format: "[{{.Topic}}] {{.Payload}}"
-message_format: "Sensor update: {{.Payload}}"
-message_format: "{{.Payload}} (from {{.Topic}})"
+
+# JSON payload — access individual fields
+message_format: "{{.Topic}}: temp={{.JSON.temperature}} humidity={{.JSON.humidity}}"
+
+# Mix of fields
+message_format: "[{{.JSON.device}}] {{.JSON.status}} ({{.Topic}})"
 ```
+
+**JSON field notes:**
+- `{{.JSON}}` is populated only when the payload is a valid JSON **object** (`{...}`). Arrays and scalar values are not parsed — use `{{.Payload}}` for those.
+- All field values are stringified, so numbers and booleans work directly in templates.
+- Missing fields produce an empty string (no error, no `<no value>` text).
+- `{{.Payload}}` always contains the raw payload string regardless of whether JSON parsing succeeded.
 
 ### Logging Configuration
 
@@ -178,27 +192,30 @@ health:
 
 ## Docker Deployment
 
-Create a `Dockerfile`:
-
-```dockerfile
-FROM golang:1.21-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN go build -o mqtt2irc ./cmd/mqtt2irc
-
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-COPY --from=builder /app/mqtt2irc /usr/local/bin/
-COPY configs/config.yaml /etc/mqtt2irc/config.yaml
-CMD ["mqtt2irc", "-config", "/etc/mqtt2irc/config.yaml"]
-```
-
-Build and run:
+Build and run with a host-mounted config file:
 
 ```bash
 docker build -t mqtt2irc .
-docker run -v ./config.yaml:/etc/mqtt2irc/config.yaml mqtt2irc
+
+# Mount a single config file
+docker run -v /path/to/config.yaml:/etc/mqtt2irc/config.yaml mqtt2irc
+
+# Or mount the entire config directory
+docker run -v /path/to/configs:/etc/mqtt2irc mqtt2irc
 ```
+
+With docker-compose:
+
+```yaml
+services:
+  mqtt2irc:
+    image: mqtt2irc
+    volumes:
+      - ./configs/config.yaml:/etc/mqtt2irc/config.yaml:ro
+    restart: unless-stopped
+```
+
+The container reads config from `/etc/mqtt2irc/config.yaml` by default. The directory is declared as a `VOLUME` so Docker treats it as a mount point, and it is owned by the non-root `mqtt2irc` user inside the container.
 
 ## Example Use Cases
 
@@ -306,9 +323,16 @@ go test ./internal/bridge/
 ### Messages aren't appearing in IRC
 
 - Verify topic mappings match your MQTT topics exactly
-- Check MQTT wildcards (`+`, `#`) are used correctly
+- Check MQTT wildcards (`+`, `#`) are used correctly — the subscription pattern in `mqtt.topics` must also use wildcards if you want subtopics (e.g. `msh/EU_868/HU/#`, not just `msh/EU_868/HU`)
 - Enable debug logging: `logging.level: "debug"`
 - Ensure the bot has joined the target channels
+
+### JSON fields not showing in formatted messages
+
+- Confirm the payload is a JSON **object** (`{...}`); arrays and scalar values are not parsed
+- Use `{{.Payload}}` to inspect the raw payload and verify it is valid JSON
+- Field names are case-sensitive and must match exactly
+- If a field is missing, the template produces an empty string — check for typos in field names
 
 ### Bot gets kicked for flooding
 

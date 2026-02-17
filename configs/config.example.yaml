@@ -51,11 +51,19 @@ irc:
 bridge:
   # Topic to channel mappings
   mappings:
-    # Simple 1:1 mapping
+    # Simple 1:1 mapping (plain text payload)
     - mqtt_topic: "sensors/temperature/#"
       irc_channels:
         - "#iot-sensors"
       message_format: "[{{.Topic}}] {{.Payload}}"
+
+    # JSON payload: access individual fields with {{.JSON.fieldname}}
+    # If the payload is a JSON object, .JSON is a map of its top-level keys (stringified).
+    # Missing fields produce empty string. Non-JSON payloads leave .JSON nil (renders as "<nil>").
+    - mqtt_topic: "sensors/env/#"
+      irc_channels:
+        - "#iot-sensors"
+      message_format: "[{{.Topic}}] temp={{.JSON.temperature}} humidity={{.JSON.humidity}}"
 
     # Wildcard mapping with custom format
     - mqtt_topic: "sensors/humidity/+"

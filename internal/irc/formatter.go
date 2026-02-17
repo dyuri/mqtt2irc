@@ -2,6 +2,7 @@ package irc
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"text/template"
@@ -17,8 +18,8 @@ func FormatMessage(msg types.Message, templateStr string, maxLength int, truncat
 		templateStr = "[{{.Topic}}] {{.Payload}}"
 	}
 
-	// Parse template
-	tmpl, err := template.New("message").Parse(templateStr)
+	// Parse template; missingkey=zero returns "" for missing JSON fields (string zero value)
+	tmpl, err := template.New("message").Option("missingkey=zero").Parse(templateStr)
 	if err != nil {
 		// Fallback to simple format if template is invalid
 		return formatSimple(msg, maxLength, truncateSuffix), nil
@@ -29,6 +30,7 @@ func FormatMessage(msg types.Message, templateStr string, maxLength int, truncat
 		"Topic":   msg.Topic,
 		"Payload": payloadString(msg.Payload),
 		"QoS":     msg.QoS,
+		"JSON":    ParseJSON(msg.Payload),
 	}
 
 	// Execute template
@@ -45,6 +47,22 @@ func FormatMessage(msg types.Message, templateStr string, maxLength int, truncat
 	result = truncate(result, maxLength, truncateSuffix)
 
 	return result, nil
+}
+
+// ParseJSON attempts to parse a payload as a JSON object.
+// Returns a map[string]string on success (values are stringified), nil otherwise.
+// Only JSON objects (not arrays or scalars) are supported.
+// Using string values ensures missing keys produce "" in templates rather than "<no value>".
+func ParseJSON(payload []byte) map[string]string {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil
+	}
+	result := make(map[string]string, len(raw))
+	for k, v := range raw {
+		result[k] = fmt.Sprintf("%v", v)
+	}
+	return result
 }
 
 // payloadString converts a payload to a display string.
