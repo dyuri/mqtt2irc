@@ -205,20 +205,41 @@ Designed for [Meshtastic](https://meshtastic.org/) mesh radio networks. Handles 
 | `dedup_window` | `30s` | Drop duplicate message IDs within this duration |
 | `id_field` | `id` | JSON field used for deduplication |
 | `type_field` | `type` | JSON field that selects the format template |
+| `node_db` | _(none)_ | Path to a JSON file for persisting node name associations across restarts |
 | `formats` | see below | Map of message type → Go template string |
 
 **Default format templates:**
 
 ```yaml
 formats:
-  nodeinfo:  "Node {{.from}} - {{.longName}} ({{.hwModel}})"
-  position:  "{{.from}} @ {{.latitudeI}},{{.longitudeI}} alt={{.altitude}}m"
-  text:      "{{.from}}: {{.text}}"
-  telemetry: "{{.from}} bat={{.batteryLevel}}%"
-  default:   "[{{.msgtype}}] from {{.from}}"
+  nodeinfo:  "📱 {{.smart_from}} - {{.longname}} ({{.hardware}})"
+  position:  "🌍 {{.smart_from}} @ {{.latitude_i}},{{.longitude_i}} alt={{.altitude}}m"
+  text:      "🖊️ {{.smart_from}}: {{.text}}"
+  telemetry: "📡 {{.smart_from}} bat={{.battery_level}}% air={{.air_util_tx}} channel={{.channel_utilization}}"
+  default:   "🗨 [{{.msgtype}}] from {{.smart_from}}: {{.payload}}"
 ```
 
-Override any subset of formats in `processor_config.formats`. The `default` template is used when the message type doesn't match any other key. All top-level and `payload` sub-object fields are available as template variables (e.g. `{{.from}}`, `{{.text}}`, `{{.longName}}`). The `type` field is available as `{{.msgtype}}` to avoid collision with Go template internals.
+Override any subset of formats in `processor_config.formats`. The `default` template is used when the message type doesn't match any other key.
+
+**Available template variables:**
+
+All top-level and `payload` sub-object fields are available. Additionally:
+
+| Variable | Description |
+|----------|-------------|
+| `{{.smart_from}}` | Best display name for the sender: shortname (from registry) → `!xxxxxxxx` sender hex → numeric `from` |
+| `{{.msgtype}}` | Message type string (`text`, `nodeinfo`, `position`, …); renamed from `type` to avoid template conflicts |
+| `{{.from}}` | Raw numeric node ID |
+| `{{.sender}}` | Hex node ID (`!xxxxxxxx`) |
+
+**Node name registry:**
+
+The processor learns node names from `nodeinfo` messages and stores `shortname`/`longname` keyed by node ID. When `node_db` is set, this registry is saved to disk after each update and reloaded at startup — so `{{.smart_from}}` displays human-readable names even for messages that arrive before a nodeinfo is seen in the current session.
+
+```yaml
+processor_config:
+  node_db: "/var/lib/mqtt2irc/meshtastic_nodes.json"
+```
 
 **Full Meshtastic example:**
 

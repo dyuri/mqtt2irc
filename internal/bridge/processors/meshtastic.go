@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"text/template"
 	"time"
@@ -21,12 +22,13 @@ func init() {
 }
 
 // defaultMeshtasticFormats are the built-in format strings for each Meshtastic message type.
+// {{.smart_from}} resolves to: registry shortname > sender field (!xxxxxxxx) > numeric from.
 var defaultMeshtasticFormats = map[string]string{
-	"nodeinfo":  "📱 {{.from}} - {{.longname}} ({{.hardware}})",
-	"position":  "🌍 {{.from}} @ {{.latitude_i}},{{.longitude_i}} alt={{.altitude}}m",
-	"text":      "🖊️ {{.from}}: {{.text}}",
-	"telemetry": "📡 {{.from}} bat={{.battery_level}}% air={{.air_util_tx}} channel={{.channel_utilization}}",
-	"default":   "🗨 [{{.msgtype}}] from {{.from}}: {{.payload}}",
+	"nodeinfo":  "📱 {{.smart_from}} - {{.longname}} ({{.hardware}})",
+	"position":  "🌍 {{.smart_from}} @ {{.latitude_i}},{{.longitude_i}} alt={{.altitude}}m",
+	"text":      "🖊️ {{.smart_from}}: {{.text}}",
+	"telemetry": "📡 {{.smart_from}} bat={{.battery_level}}% air={{.air_util_tx}} channel={{.channel_utilization}}",
+	"default":   "🗨 [{{.msgtype}}] from {{.smart_from}}: {{.payload}}",
 }
 
 type meshtasticProcessor struct {
@@ -35,6 +37,7 @@ type meshtasticProcessor struct {
 	typeField   string
 	formats     map[string]*template.Template
 	cache       *dedupCache
+	nodes       *nodeRegistry
 }
 
 // newMeshtasticProcessor creates a Meshtastic processor from a config map.
@@ -59,6 +62,17 @@ func newMeshtasticProcessor(config map[string]interface{}) (bridge.Processor, er
 	if v, ok := config["type_field"]; ok {
 		p.typeField = fmt.Sprintf("%v", v)
 	}
+
+	// Node registry — optional persistence via node_db path.
+	nodeDBPath := ""
+	if v, ok := config["node_db"]; ok {
+		nodeDBPath = fmt.Sprintf("%v", v)
+	}
+	reg := newNodeRegistry(nodeDBPath)
+	if err := reg.load(); err != nil {
+		return nil, fmt.Errorf("meshtastic: failed to load node registry: %w", err)
+	}
+	p.nodes = reg
 
 	// Start from defaults, then override with user-supplied formats.
 	fmtStrings := make(map[string]string, len(defaultMeshtasticFormats))
@@ -109,6 +123,20 @@ func (p *meshtasticProcessor) Process(msg types.Message) (bridge.ProcessResult, 
 	// Build flat template data from nested JSON.
 	data := flattenMeshtastic(raw, msgType)
 
+	// Update node registry on nodeinfo messages.
+	if msgType == "nodeinfo" {
+		if fromStr, _ := data["from"].(string); fromStr != "" {
+			rec := nodeRecord{UpdatedAt: time.Now()}
+			rec.ShortName, _ = data["shortname"].(string)
+			rec.LongName, _ = data["longname"].(string)
+			// Non-fatal: in-memory registry is always updated; only disk write may fail.
+			_ = p.nodes.update(fromStr, rec)
+		}
+	}
+
+	// Add smart_from: registry shortname > sender field (!xxxxxxxx) > raw from.
+	data["smart_from"] = p.smartFrom(data)
+
 	// Select the best matching template.
 	tmpl := p.selectTemplate(msgType)
 	if tmpl == nil {
@@ -122,6 +150,24 @@ func (p *meshtasticProcessor) Process(msg types.Message) (bridge.ProcessResult, 
 
 	// Return the raw rendered string; bridge applies SanitizeAndTruncate.
 	return bridge.ProcessResult{Formatted: buf.String()}, nil
+}
+
+// smartFrom resolves the best display name for a message sender.
+//
+// Priority:
+//  1. shortname from the node registry (populated by nodeinfo messages)
+//  2. sender field from the current message (!xxxxxxxx — always 9 chars)
+//  3. raw from value (numeric node ID)
+func (p *meshtasticProcessor) smartFrom(data map[string]interface{}) string {
+	fromStr, _ := data["from"].(string)
+
+	if rec, ok := p.nodes.get(fromStr); ok && rec.ShortName != "" {
+		return rec.ShortName
+	}
+	if sender, _ := data["sender"].(string); sender != "" {
+		return sender
+	}
+	return fromStr
 }
 
 // selectTemplate returns the template for msgType, or the "default" template, or nil.
@@ -197,6 +243,92 @@ func stringify(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+// --- node registry ---
+
+// nodeRecord holds the known identity information for a Meshtastic node.
+// It is populated from nodeinfo messages and persisted across restarts.
+type nodeRecord struct {
+	ShortName string    `json:"shortname,omitempty"`
+	LongName  string    `json:"longname,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// nodeRegistry stores node identity associations keyed by the numeric node ID
+// (the "from" field, stringified). When a node_db path is configured, the
+// registry is loaded at startup and saved atomically after each update.
+type nodeRegistry struct {
+	mu    sync.RWMutex
+	nodes map[string]nodeRecord
+	path  string // empty = in-memory only, no persistence
+}
+
+func newNodeRegistry(path string) *nodeRegistry {
+	return &nodeRegistry{
+		nodes: make(map[string]nodeRecord),
+		path:  path,
+	}
+}
+
+// load reads the node registry from disk. No-op when path is empty or file does not exist.
+func (r *nodeRegistry) load() error {
+	if r.path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(r.path)
+	if os.IsNotExist(err) {
+		return nil // fresh start; file will be created on first update
+	}
+	if err != nil {
+		return fmt.Errorf("node registry: read %s: %w", r.path, err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := json.Unmarshal(data, &r.nodes); err != nil {
+		return fmt.Errorf("node registry: parse %s: %w", r.path, err)
+	}
+	return nil
+}
+
+// save writes the node registry to disk atomically (write temp + rename).
+// No-op when path is empty.
+func (r *nodeRegistry) save() error {
+	if r.path == "" {
+		return nil
+	}
+	r.mu.RLock()
+	data, err := json.MarshalIndent(r.nodes, "", "  ")
+	r.mu.RUnlock()
+	if err != nil {
+		return fmt.Errorf("node registry: marshal: %w", err)
+	}
+	tmpPath := r.path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return fmt.Errorf("node registry: write %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, r.path); err != nil {
+		return fmt.Errorf("node registry: rename to %s: %w", r.path, err)
+	}
+	return nil
+}
+
+// get returns the record for a node ID, if known.
+func (r *nodeRegistry) get(from string) (nodeRecord, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	rec, ok := r.nodes[from]
+	return rec, ok
+}
+
+// update stores a node record in memory and persists to disk.
+// The in-memory update always succeeds; a non-nil error indicates only that
+// the disk write failed (the registry remains correct in memory).
+func (r *nodeRegistry) update(from string, rec nodeRecord) error {
+	r.mu.Lock()
+	r.nodes[from] = rec
+	r.mu.Unlock()
+	return r.save()
 }
 
 // --- dedup cache ---

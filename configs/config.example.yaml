@@ -86,15 +86,16 @@ bridge:
     #     - "#meshtastic"
     #   processor: "meshtastic"
     #   processor_config:
-    #     dedup_window: "30s"      # suppress duplicate message IDs within this window
-    #     id_field: "id"           # JSON field used for deduplication (default: "id")
-    #     type_field: "type"       # JSON field for message type (default: "type")
+    #     dedup_window: "30s"    # suppress duplicate message IDs within this window
+    #     id_field: "id"         # JSON field for dedup key (default: "id")
+    #     type_field: "type"     # JSON field for message type (default: "type")
+    #     node_db: "/var/lib/mqtt2irc/meshtastic_nodes.json"  # persist node names across restarts
     #     formats:
-    #       nodeinfo:  "Node {{.from}} - {{.longName}} ({{.hwModel}})"
-    #       position:  "{{.from}} @ {{.latitudeI}},{{.longitudeI}} alt={{.altitude}}m"
-    #       text:      "{{.from}}: {{.text}}"
-    #       telemetry: "{{.from}} bat={{.batteryLevel}}%"
-    #       default:   "[{{.msgtype}}] from {{.from}}"
+    #       nodeinfo:  "📱 {{.smart_from}} - {{.longname}} ({{.hardware}})"
+    #       position:  "🌍 {{.smart_from}} @ {{.latitude_i}},{{.longitude_i}} alt={{.altitude}}m"
+    #       text:      "🖊️ {{.smart_from}}: {{.text}}"
+    #       telemetry: "📡 {{.smart_from}} bat={{.battery_level}}% air={{.air_util_tx}} channel={{.channel_utilization}}"
+    #       default:   "🗨 [{{.msgtype}}] from {{.smart_from}}: {{.payload}}"
 
   # Message queue configuration
   queue:
