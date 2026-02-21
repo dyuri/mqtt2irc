@@ -20,6 +20,7 @@ type Bridge struct {
 	mqttClient *mqtt.Client
 	ircClient  *irc.Client
 	mapper     *Mapper
+	processors map[string]Processor // mqtt_topic pattern → Processor (nil if none configured)
 	msgQueue   chan types.Message
 	logger     zerolog.Logger
 	wg         sync.WaitGroup
@@ -42,11 +43,25 @@ func New(cfg *config.Config, logger zerolog.Logger) (*Bridge, error) {
 	// Create mapper
 	mapper := NewMapper(cfg.Bridge.Mappings)
 
+	// Instantiate processors for mappings that declare one.
+	processors := make(map[string]Processor)
+	for _, m := range cfg.Bridge.Mappings {
+		if m.Processor == "" {
+			continue
+		}
+		p, err := NewProcessor(m.Processor, m.ProcessorConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create processor for mapping %q: %w", m.MQTTTopic, err)
+		}
+		processors[m.MQTTTopic] = p
+	}
+
 	return &Bridge{
 		config:     cfg.Bridge,
 		mqttClient: mqttClient,
 		ircClient:  ircClient,
 		mapper:     mapper,
+		processors: processors,
 		msgQueue:   msgQueue,
 		logger:     logger.With().Str("component", "bridge").Logger(),
 	}, nil
@@ -133,8 +148,52 @@ func (b *Bridge) handleMessage(ctx context.Context, msg types.Message) {
 
 	// Send to all matched channels
 	for _, mapping := range mappings {
-		// Format message
-		formatted, err := irc.FormatMessage(
+		var formatted string
+
+		// If a processor is registered for this mapping, run it first.
+		if proc, ok := b.processors[mapping.MQTTTopic]; ok {
+			result, err := proc.Process(msg)
+			if err != nil {
+				b.logger.Error().
+					Err(err).
+					Str("topic", msg.Topic).
+					Str("processor", mapping.Processor).
+					Msg("processor error")
+			}
+			if result.Drop {
+				b.logger.Debug().
+					Str("topic", msg.Topic).
+					Msg("message dropped by processor")
+				continue
+			}
+			if result.Formatted != "" {
+				formatted = irc.SanitizeAndTruncate(
+					result.Formatted,
+					b.config.MaxMessageLength,
+					b.config.TruncateSuffix,
+				)
+				// Send pre-formatted output directly, skipping FormatMessage.
+				for _, channel := range mapping.IRCChannels {
+					if err := b.ircClient.SendMessage(ctx, channel, formatted); err != nil {
+						b.logger.Error().
+							Err(err).
+							Str("channel", channel).
+							Str("topic", msg.Topic).
+							Msg("failed to send message to IRC")
+					} else {
+						b.logger.Debug().
+							Str("channel", channel).
+							Str("topic", msg.Topic).
+							Msg("message sent to IRC")
+					}
+				}
+				continue
+			}
+		}
+
+		// No processor, or processor passed through — use normal template formatting.
+		var err error
+		formatted, err = irc.FormatMessage(
 			msg,
 			mapping.MessageFormat,
 			b.config.MaxMessageLength,

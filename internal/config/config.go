@@ -60,9 +60,11 @@ type BridgeConfig struct {
 
 // MappingConfig maps MQTT topics to IRC channels
 type MappingConfig struct {
-	MQTTTopic     string   `mapstructure:"mqtt_topic"`
-	IRCChannels   []string `mapstructure:"irc_channels"`
-	MessageFormat string   `mapstructure:"message_format"`
+	MQTTTopic       string                 `mapstructure:"mqtt_topic"`
+	IRCChannels     []string               `mapstructure:"irc_channels"`
+	MessageFormat   string                 `mapstructure:"message_format"`
+	Processor       string                 `mapstructure:"processor"`
+	ProcessorConfig map[string]interface{} `mapstructure:"processor_config"`
 }
 
 // QueueConfig contains message queue settings

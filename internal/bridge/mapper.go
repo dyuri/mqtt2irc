@@ -19,22 +19,13 @@ func NewMapper(mappings []config.MappingConfig) *Mapper {
 	}
 }
 
-// MatchedMapping represents a matched mapping with its configuration
-type MatchedMapping struct {
-	IRCChannels   []string
-	MessageFormat string
-}
-
-// Map finds all IRC channels and formats for a given MQTT topic
-func (m *Mapper) Map(topic string) []MatchedMapping {
-	var results []MatchedMapping
+// Map finds all matching mapping configs for a given MQTT topic
+func (m *Mapper) Map(topic string) []config.MappingConfig {
+	var results []config.MappingConfig
 
 	for _, mapping := range m.mappings {
 		if m.matchTopic(topic, mapping.MQTTTopic) {
-			results = append(results, MatchedMapping{
-				IRCChannels:   mapping.IRCChannels,
-				MessageFormat: mapping.MessageFormat,
-			})
+			results = append(results, mapping)
 		}
 	}
 

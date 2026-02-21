@@ -9,6 +9,7 @@ A lightweight, reliable bridge that forwards messages from MQTT topics to IRC ch
 - **Message Formatting**: Customizable message templates using Go templates
 - **JSON Payload Support**: Automatically parses JSON payloads — access individual fields with `{{.JSON.fieldname}}`
 - **Binary Payload Safety**: Binary (non-UTF-8) payloads are displayed as `[binary data, N bytes]` instead of garbled output
+- **Message Processors**: Per-mapping pre-processors for deduplication, type-based routing, and custom formatting (built-in: Meshtastic)
 - **Rate Limiting**: Built-in token bucket rate limiter to prevent IRC flood kicks
 - **Auto-Reconnection**: Automatic reconnection to both MQTT and IRC with exponential backoff
 - **TLS Support**: Secure connections for both MQTT and IRC
@@ -170,6 +171,79 @@ message_format: "[{{.JSON.device}}] {{.JSON.status}} ({{.Topic}})"
 - Missing fields produce an empty string (no error, no `<no value>` text).
 - `{{.Payload}}` always contains the raw payload string regardless of whether JSON parsing succeeded.
 
+### Message Processors
+
+Processors are optional per-mapping hooks that run before the normal template formatting. A processor can filter (drop) a message or provide its own pre-formatted output.
+
+```yaml
+bridge:
+  mappings:
+    - mqtt_topic: "some/topic/#"
+      irc_channels:
+        - "#mychannel"
+      processor: "meshtastic"       # processor name
+      processor_config:             # processor-specific settings
+        dedup_window: "30s"
+```
+
+When a processor is set, `message_format` is only used as a fallback if the processor passes the message through without a formatted result.
+
+#### Built-in: `meshtastic`
+
+Designed for [Meshtastic](https://meshtastic.org/) mesh radio networks. Handles the heterogeneous JSON message types that Meshtastic nodes publish over MQTT.
+
+**What it does:**
+- **Deduplication**: Drops messages whose `id` field was seen within `dedup_window` (prevents duplicates caused by mesh re-broadcasts)
+- **Type routing**: Selects a format template based on the `type` field of the JSON payload
+- **Payload flattening**: Hoists fields from the nested `payload` sub-object to the top level for easy template access
+- **Integer rendering**: JSON numbers are rendered as plain integers (e.g. `479000000`, not `4.79e+08`)
+
+**`processor_config` options:**
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `dedup_window` | `30s` | Drop duplicate message IDs within this duration |
+| `id_field` | `id` | JSON field used for deduplication |
+| `type_field` | `type` | JSON field that selects the format template |
+| `formats` | see below | Map of message type → Go template string |
+
+**Default format templates:**
+
+```yaml
+formats:
+  nodeinfo:  "Node {{.from}} - {{.longName}} ({{.hwModel}})"
+  position:  "{{.from}} @ {{.latitudeI}},{{.longitudeI}} alt={{.altitude}}m"
+  text:      "{{.from}}: {{.text}}"
+  telemetry: "{{.from}} bat={{.batteryLevel}}%"
+  default:   "[{{.msgtype}}] from {{.from}}"
+```
+
+Override any subset of formats in `processor_config.formats`. The `default` template is used when the message type doesn't match any other key. All top-level and `payload` sub-object fields are available as template variables (e.g. `{{.from}}`, `{{.text}}`, `{{.longName}}`). The `type` field is available as `{{.msgtype}}` to avoid collision with Go template internals.
+
+**Full Meshtastic example:**
+
+```yaml
+mqtt:
+  topics:
+    - pattern: "msh/EU_868/HU/#"
+      qos: 1
+
+bridge:
+  mappings:
+    - mqtt_topic: "msh/EU_868/HU/#"
+      irc_channels:
+        - "#meshtastic"
+      processor: "meshtastic"
+      processor_config:
+        dedup_window: "30s"
+        formats:
+          nodeinfo:  "Node {{.from}} - {{.longName}} ({{.hwModel}})"
+          position:  "{{.from}} @ {{.latitudeI}},{{.longitudeI}} alt={{.altitude}}m"
+          text:      "{{.from}}: {{.text}}"
+          telemetry: "{{.from}} bat={{.batteryLevel}}%"
+          default:   "[{{.msgtype}}] from {{.from}}"
+```
+
 ### Logging Configuration
 
 ```yaml
@@ -253,6 +327,25 @@ bridge:
       message_format: "🚨 CRITICAL: {{.Payload}}"
 ```
 
+### Meshtastic Mesh Network
+
+Bridge a Meshtastic MQTT feed to IRC with deduplication and type-aware formatting:
+
+```yaml
+mqtt:
+  topics:
+    - pattern: "msh/EU_868/HU/#"
+      qos: 1
+
+bridge:
+  mappings:
+    - mqtt_topic: "msh/EU_868/HU/#"
+      irc_channels: ["#meshtastic"]
+      processor: "meshtastic"
+      processor_config:
+        dedup_window: "30s"
+```
+
 ### Multi-Environment Monitoring
 
 Separate production and staging environments:
@@ -278,6 +371,7 @@ mqtt2irc/
 ├── cmd/mqtt2irc/          # Application entry point
 ├── internal/
 │   ├── bridge/            # Bridge orchestration and mapping
+│   │   └── processors/    # Built-in message processors (meshtastic, ...)
 │   ├── config/            # Configuration loading and validation
 │   ├── health/            # Health check HTTP server
 │   ├── irc/               # IRC client wrapper

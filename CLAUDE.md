@@ -59,6 +59,8 @@ MQTT Broker → MQTT Client → messageHandler → Message Queue (chan)
     ↓
 Bridge Worker reads from queue → Mapper (match topics)
     ↓
+Processor (optional, per-mapping): filter / pre-format
+    ↓ (pass-through or pre-formatted)
 Formatter (apply template) → IRC Client (rate limit)
     ↓
 IRC Server
@@ -83,7 +85,10 @@ mqtt2irc/
 ├── internal/               # Private application code
 │   ├── bridge/             # Core business logic
 │   │   ├── bridge.go       # Orchestrates MQTT→IRC flow
-│   │   └── mapper.go       # Topic pattern matching (+ and # wildcards)
+│   │   ├── mapper.go       # Topic pattern matching (+ and # wildcards)
+│   │   ├── processor.go    # Processor interface, ProcessResult, registry
+│   │   └── processors/     # Built-in processor implementations
+│   │       └── meshtastic.go  # Meshtastic JSON processor + init() registration
 │   ├── config/             # Configuration management
 │   │   ├── config.go       # Viper loading, structures, defaults
 │   │   └── validation.go   # Config validation rules
@@ -100,8 +105,9 @@ mqtt2irc/
 
 ### Package Responsibilities
 
-- **cmd/mqtt2irc**: Application bootstrap only. No business logic.
-- **internal/bridge**: Core orchestration. Owns message flow and mapping logic.
+- **cmd/mqtt2irc**: Application bootstrap only. No business logic. Blank-imports `bridge/processors` to trigger processor registration.
+- **internal/bridge**: Core orchestration. Owns message flow, mapping logic, and the processor registry.
+- **internal/bridge/processors**: Built-in processor implementations. Each registers itself via `init()`.
 - **internal/config**: All configuration concerns. Validation happens here.
 - **internal/mqtt**: MQTT client abstraction. Hides paho.mqtt implementation.
 - **internal/irc**: IRC client abstraction. Hides girc implementation.
@@ -241,6 +247,25 @@ go test ./internal/bridge -v  # Test specific package
 4. Update example configs
 5. Document in README.md
 
+### Adding a New Processor
+
+1. Create `internal/bridge/processors/<name>.go` in package `processors`
+2. Implement `bridge.Processor` interface: `Process(msg types.Message) (bridge.ProcessResult, error)`
+3. Add a constructor `func newXxxProcessor(config map[string]interface{}) (bridge.Processor, error)`
+4. Register in `init()`: `bridge.Register("name", newXxxProcessor)`
+5. Add tests in `<name>_test.go`
+6. Document `processor_config` options in README.md
+
+**Import chain (no circular imports):**
+- `processors` → `bridge` (for interface + Register)
+- `main` → `_ processors` (blank import, triggers init)
+- `bridge` does NOT import `processors`
+
+**ProcessResult semantics:**
+- `{Drop: true}` — discard message, do not send to IRC
+- `{Formatted: "..."}` — use this string (bridge applies SanitizeAndTruncate)
+- `{}` — pass through to normal `FormatMessage` template path
+
 ### Adding a New Message Format Variable
 
 1. Add field to template data map in `irc/formatter.go:FormatMessage()`
@@ -315,9 +340,8 @@ case msg := <-queue:
 
 1. **One-Way Only**: MQTT → IRC only (no IRC → MQTT)
 2. **Single MQTT Broker**: Cannot subscribe to multiple brokers
-3. **No Message Filtering**: All matched messages are forwarded
-4. **No Metrics**: No Prometheus/StatsD integration
-5. **Static Config**: Requires restart to change mappings
+3. **No Metrics**: No Prometheus/StatsD integration
+4. **Static Config**: Requires restart to change mappings
 
 ### Planned Enhancements (Phase 2+)
 
@@ -358,13 +382,29 @@ case msg := <-queue:
 4. Add `/metrics` endpoint to health server
 5. Update Dockerfile with metrics port
 
-### Adding Message Filtering
+### Adding a New Processor Type
 
-1. Add `Filters []FilterConfig` to `MappingConfig`
-2. Create `internal/bridge/filter.go` with regex matching
-3. Apply filters before formatting in bridge worker
-4. Add filter tests
-5. Document filter syntax in README
+See "Adding a New Processor" in Common Tasks above. Example skeleton:
+
+```go
+package processors
+
+import "github.com/dyuri/mqtt2irc/internal/bridge"
+import "github.com/dyuri/mqtt2irc/pkg/types"
+
+func init() { bridge.Register("myprocessor", newMyProcessor) }
+
+type myProcessor struct{}
+
+func newMyProcessor(cfg map[string]interface{}) (bridge.Processor, error) {
+    return &myProcessor{}, nil
+}
+
+func (p *myProcessor) Process(msg types.Message) (bridge.ProcessResult, error) {
+    // Return Drop:true to filter, Formatted:"..." to override, or {} to pass through.
+    return bridge.ProcessResult{}, nil
+}
+```
 
 ## Development Workflow
 
@@ -488,7 +528,7 @@ make docker-compose-up
 - **Production Ready**: Yes
 - **Test Coverage**: Core modules (mapper, formatter)
 - **Documentation**: Complete
-- **Last Updated**: 2026-02-15
+- **Last Updated**: 2026-02-21
 
 ---
 

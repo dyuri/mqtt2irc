@@ -82,6 +82,14 @@ func formatSimple(msg types.Message, maxLength int, truncateSuffix string) strin
 	return result
 }
 
+// SanitizeAndTruncate applies IRC sanitization and length truncation to a pre-formatted string.
+// This is the exported entry point for message processors that pre-format their output.
+func SanitizeAndTruncate(s string, maxLen int, suffix string) string {
+	s = sanitize(s)
+	s = truncate(s, maxLen, suffix)
+	return s
+}
+
 // sanitize removes or replaces problematic characters for IRC
 func sanitize(s string) string {
 	// Remove control characters except for common formatting codes
