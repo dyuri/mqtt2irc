@@ -14,6 +14,22 @@ type Config struct {
 	Bridge  BridgeConfig  `mapstructure:"bridge"`
 	Logging LoggingConfig `mapstructure:"logging"`
 	Health  HealthConfig  `mapstructure:"health"`
+	Admin   AdminConfig   `mapstructure:"admin"`
+}
+
+// AdminConfig contains IRC admin command system configuration
+type AdminConfig struct {
+	Enabled       bool             `mapstructure:"enabled"`
+	CommandPrefix string           `mapstructure:"command_prefix"`
+	AllowList     []AdminAllowEntry `mapstructure:"allow_list"`
+	Channels      []string         `mapstructure:"channels"`
+	AcceptPM      bool             `mapstructure:"accept_pm"`
+}
+
+// AdminAllowEntry defines an authorized IRC user for admin commands
+type AdminAllowEntry struct {
+	Nick     string `mapstructure:"nick"`
+	Hostmask string `mapstructure:"hostmask"`
 }
 
 // MQTTConfig contains MQTT broker configuration
@@ -103,6 +119,9 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("logging.format", "json")
 	v.SetDefault("health.enabled", true)
 	v.SetDefault("health.port", 8080)
+	v.SetDefault("admin.enabled", false)
+	v.SetDefault("admin.command_prefix", "!")
+	v.SetDefault("admin.accept_pm", true)
 
 	// Configure Viper
 	if configPath != "" {

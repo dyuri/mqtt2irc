@@ -18,13 +18,14 @@ import (
 
 // Client wraps the IRC client
 type Client struct {
-	client   *girc.Client
-	config   config.IRCConfig
-	logger   zerolog.Logger
-	limiter  *rate.Limiter
-	channels map[string]bool
-	mu       sync.RWMutex
-	ready    chan struct{}
+	client      *girc.Client
+	config      config.IRCConfig
+	logger      zerolog.Logger
+	limiter     *rate.Limiter
+	channels    map[string]bool
+	mu          sync.RWMutex
+	ready       chan struct{}
+	readyClosed bool
 }
 
 // New creates a new IRC client
@@ -125,8 +126,13 @@ func (c *Client) onConnect(client *girc.Client, event girc.Event) {
 		time.Sleep(2 * time.Second)
 	}
 
-	// Signal that we're ready
-	close(c.ready)
+	// Signal that we're ready (guard against double-close on reconnect cycles)
+	c.mu.Lock()
+	if !c.readyClosed {
+		close(c.ready)
+		c.readyClosed = true
+	}
+	c.mu.Unlock()
 }
 
 // onDisconnect is called when connection is lost
@@ -187,4 +193,30 @@ func (c *Client) Disconnect() {
 // IsConnected returns true if connected to IRC server
 func (c *Client) IsConnected() bool {
 	return c.client.IsConnected()
+}
+
+// Nick changes the bot's IRC nickname.
+func (c *Client) Nick(newnick string) {
+	c.client.Cmd.Nick(newnick)
+}
+
+// Reconnect drops the current connection and reconnects.
+// girc v1.1.1 has no built-in Reconnect(); we reset state and re-call Connect().
+func (c *Client) Reconnect() {
+	c.mu.Lock()
+	c.ready = make(chan struct{})
+	c.readyClosed = false
+	c.channels = make(map[string]bool)
+	c.mu.Unlock()
+	c.client.Close()
+	go func() {
+		if err := c.client.Connect(); err != nil {
+			c.logger.Error().Err(err).Msg("IRC reconnect failed")
+		}
+	}()
+}
+
+// AddHandler registers an additional girc event handler.
+func (c *Client) AddHandler(event string, handler func(*girc.Client, girc.Event)) {
+	c.client.Handlers.Add(event, handler)
 }

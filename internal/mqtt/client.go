@@ -159,3 +159,17 @@ func (c *Client) Disconnect(timeout time.Duration) {
 func (c *Client) IsConnected() bool {
 	return c.client.IsConnected()
 }
+
+// ForceReconnect disconnects and immediately reconnects to the MQTT broker.
+// The onConnect handler will re-subscribe to all configured topics.
+func (c *Client) ForceReconnect() {
+	c.logger.Info().Msg("admin-initiated MQTT reconnect")
+	c.client.Disconnect(250)
+	token := c.client.Connect()
+	go func() {
+		token.Wait()
+		if token.Error() != nil {
+			c.logger.Error().Err(token.Error()).Msg("MQTT reconnect failed")
+		}
+	}()
+}

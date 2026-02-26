@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lrstanley/girc"
 	"github.com/rs/zerolog"
 
 	"github.com/dyuri/mqtt2irc/internal/config"
@@ -262,4 +263,29 @@ func (b *Bridge) HealthStatus() map[string]interface{} {
 		"queue_size":     len(b.msgQueue),
 		"queue_capacity": cap(b.msgQueue),
 	}
+}
+
+// SendMessage sends a message to an IRC channel (implements admin.BridgeAdmin).
+func (b *Bridge) SendMessage(ctx context.Context, channel, message string) error {
+	return b.ircClient.SendMessage(ctx, channel, message)
+}
+
+// NickChange changes the bot's IRC nickname (implements admin.BridgeAdmin).
+func (b *Bridge) NickChange(newnick string) {
+	b.ircClient.Nick(newnick)
+}
+
+// ReconnectIRC drops and re-establishes the IRC connection (implements admin.BridgeAdmin).
+func (b *Bridge) ReconnectIRC() {
+	b.ircClient.Reconnect()
+}
+
+// ReconnectMQTT drops and re-establishes the MQTT connection (implements admin.BridgeAdmin).
+func (b *Bridge) ReconnectMQTT() {
+	b.mqttClient.ForceReconnect()
+}
+
+// AddIRCHandler registers an additional girc event handler.
+func (b *Bridge) AddIRCHandler(event string, handler func(*girc.Client, girc.Event)) {
+	b.ircClient.AddHandler(event, handler)
 }

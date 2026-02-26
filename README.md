@@ -10,6 +10,7 @@ A lightweight, reliable bridge that forwards messages from MQTT topics to IRC ch
 - **JSON Payload Support**: Automatically parses JSON payloads — access individual fields with `{{.JSON.fieldname}}`
 - **Binary Payload Safety**: Binary (non-UTF-8) payloads are displayed as `[binary data, N bytes]` instead of garbled output
 - **Message Processors**: Per-mapping pre-processors for deduplication, type-based routing, and custom formatting (built-in: Meshtastic)
+- **IRC Admin Commands**: Control the running bridge via PRIVMSG commands (`!status`, `!nick`, `!reconnect`, `!shutdown`)
 - **Rate Limiting**: Built-in token bucket rate limiter to prevent IRC flood kicks
 - **Auto-Reconnection**: Automatic reconnection to both MQTT and IRC with exponential backoff
 - **TLS Support**: Secure connections for both MQTT and IRC
@@ -285,6 +286,45 @@ health:
 - `GET /health` - Returns JSON with connection status and queue info
 - `GET /ready` - Returns 200 if ready, 503 if not (Kubernetes readiness probe)
 
+### Admin Command Configuration
+
+The admin system lets authorized IRC users control the running bridge via PRIVMSG. It is **disabled by default**.
+
+```yaml
+admin:
+  enabled: false           # Must be explicitly enabled
+  command_prefix: "!"      # Prefix for admin commands
+  accept_pm: true          # Accept commands sent as private messages to the bot
+  channels:                # Channels where commands are accepted
+    - "#ops"
+  allow_list:              # Authorized users (required when enabled)
+    - nick: "adminuser"
+      hostmask: "*@trusted.isp.net"  # Optional glob; omit for nick-only (weaker)
+    - nick: "localadmin"
+      # no hostmask: nick match alone grants access
+```
+
+**Available commands:**
+
+| Command | Description |
+|---------|-------------|
+| `!help` | List all commands |
+| `!status` / `!health` | Show MQTT/IRC connection status and queue size |
+| `!nick <newnick>` | Change the bot's IRC nickname |
+| `!reconnect mqtt` | Disconnect and reconnect to the MQTT broker |
+| `!reconnect irc` | Disconnect and reconnect to the IRC server |
+| `!shutdown` | Gracefully shut down the bridge |
+
+**Security notes:**
+
+IRC authentication has inherent limitations. The admin system uses two factors: nick (case-insensitive) and an optional hostmask glob matched with `path.Match`. Keep these in mind:
+
+- **Nick-only auth is weak** — anyone who takes the nick can run commands. Always configure `hostmask` for sensitive deployments.
+- **Hostmask reliability** depends on the IRC network. Server-enforced vhosts/cloaks (e.g., `user/nick` on Libera.Chat) are most reliable.
+- The `hostmask` glob format is `ident@host`. `*` matches any sequence of characters excluding `/`.  For example, `*@trusted.net` matches `user@trusted.net` and `user@sub.trusted.net` (since `.` is not a separator).
+- All command attempts (authorized or not) are logged with nick and host for auditing.
+- `!shutdown` sends `SIGTERM` to the process, triggering the normal graceful shutdown path.
+
 ## Docker Deployment
 
 Build and run with a host-mounted config file:
@@ -391,6 +431,7 @@ bridge:
 mqtt2irc/
 ├── cmd/mqtt2irc/          # Application entry point
 ├── internal/
+│   ├── admin/             # IRC admin command handler
 │   ├── bridge/            # Bridge orchestration and mapping
 │   │   └── processors/    # Built-in message processors (meshtastic, ...)
 │   ├── config/            # Configuration loading and validation

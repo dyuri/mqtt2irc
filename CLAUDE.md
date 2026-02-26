@@ -81,10 +81,13 @@ IRC Server
 ```
 mqtt2irc/
 ├── cmd/mqtt2irc/           # Application entry point only
-│   └── main.go             # Signal handling, lifecycle, logger setup
+│   └── main.go             # Signal handling, lifecycle, logger setup, admin wiring
 ├── internal/               # Private application code
+│   ├── admin/              # IRC admin command handler
+│   │   ├── handler.go      # BridgeAdmin interface, Config, Handler, auth, dispatch
+│   │   └── commands.go     # Individual command implementations
 │   ├── bridge/             # Core business logic
-│   │   ├── bridge.go       # Orchestrates MQTT→IRC flow
+│   │   ├── bridge.go       # Orchestrates MQTT→IRC flow + admin delegate methods
 │   │   ├── mapper.go       # Topic pattern matching (+ and # wildcards)
 │   │   ├── processor.go    # Processor interface, ProcessResult, registry
 │   │   └── processors/     # Built-in processor implementations
@@ -95,7 +98,7 @@ mqtt2irc/
 │   ├── mqtt/               # MQTT client wrapper
 │   │   └── client.go       # Wraps paho.mqtt, handles reconnection
 │   ├── irc/                # IRC client wrapper
-│   │   ├── client.go       # Wraps girc, rate limiting, channel joins
+│   │   ├── client.go       # Wraps girc, rate limiting, channel joins, Nick/Reconnect
 │   │   └── formatter.go    # Message templating, sanitization, truncation
 │   └── health/             # Health check HTTP server
 │       └── checker.go      # /health and /ready endpoints
@@ -105,8 +108,9 @@ mqtt2irc/
 
 ### Package Responsibilities
 
-- **cmd/mqtt2irc**: Application bootstrap only. No business logic. Blank-imports `bridge/processors` to trigger processor registration.
-- **internal/bridge**: Core orchestration. Owns message flow, mapping logic, and the processor registry.
+- **cmd/mqtt2irc**: Application bootstrap only. No business logic. Blank-imports `bridge/processors` to trigger processor registration. Wires admin handler if enabled.
+- **internal/admin**: IRC PRIVMSG-based admin command handler. Defines `BridgeAdmin` interface (no import of `bridge` — avoids circular import). Wired in `main.go`.
+- **internal/bridge**: Core orchestration. Owns message flow, mapping logic, and the processor registry. Exposes delegate methods that implement `admin.BridgeAdmin`.
 - **internal/bridge/processors**: Built-in processor implementations. Each registers itself via `init()`.
 - **internal/config**: All configuration concerns. Validation happens here.
 - **internal/mqtt**: MQTT client abstraction. Hides paho.mqtt implementation.
@@ -266,6 +270,22 @@ go test ./internal/bridge -v  # Test specific package
 - `{Formatted: "..."}` — use this string (bridge applies SanitizeAndTruncate)
 - `{}` — pass through to normal `FormatMessage` template path
 
+### Adding a New Admin Command
+
+1. Open `internal/admin/commands.go`
+2. Add a new `case` in the `dispatch()` switch statement
+3. Implement a `cmdXxx(client *girc.Client, replyTo string, args []string)` method on `*Handler`
+4. Add any required method to the `BridgeAdmin` interface in `handler.go`
+5. Implement the new method on `*Bridge` in `internal/bridge/bridge.go`
+6. Add tests in `internal/admin/handler_test.go`
+7. Update the `!help` output in `cmdHelp()`
+8. Document in README.md
+
+**Import chain (no circular imports):**
+- `admin` defines `BridgeAdmin` interface — does NOT import `bridge`
+- `bridge` exposes delegate methods — does NOT import `admin`
+- `main` imports both and wires them together
+
 ### Adding a New Message Format Variable
 
 1. Add field to template data map in `irc/formatter.go:FormatMessage()`
@@ -338,7 +358,7 @@ case msg := <-queue:
 
 ### Current Limitations
 
-1. **One-Way Only**: MQTT → IRC only (no IRC → MQTT)
+1. **One-Way Messages**: MQTT → IRC only for data messages (no IRC → MQTT); admin commands provide bridge control but not message routing
 2. **Single MQTT Broker**: Cannot subscribe to multiple brokers
 3. **No Metrics**: No Prometheus/StatsD integration
 4. **Static Config**: Requires restart to change mappings
@@ -466,6 +486,15 @@ make docker-compose-up
 - Certificate validation enabled
 - No plaintext credentials in logs
 
+### Admin Command Security
+
+- Admin system is **disabled by default** (`admin.enabled: false`)
+- `allow_list` is required when enabled; validation rejects empty lists
+- All command attempts (authorized or not) are audit-logged with nick and host
+- Hostmask glob uses `path.Match` (stdlib, no eval); patterns validated at startup
+- `!shutdown` sends `SIGTERM` — reuses existing graceful shutdown, no new code path
+- IRC authentication has inherent limitations: prefer hostmask auth over nick-only
+
 ## Troubleshooting Guide
 
 ### "Config File Not Found"
@@ -526,9 +555,9 @@ make docker-compose-up
 
 - **Current Phase**: Phase 1 (MVP) - ✅ COMPLETE
 - **Production Ready**: Yes
-- **Test Coverage**: Core modules (mapper, formatter)
+- **Test Coverage**: Core modules (mapper, formatter, admin handler)
 - **Documentation**: Complete
-- **Last Updated**: 2026-02-21
+- **Last Updated**: 2026-02-26
 
 ---
 

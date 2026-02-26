@@ -123,3 +123,21 @@ health:
   # Endpoints:
   # - GET /health - Returns JSON with connection status
   # - GET /ready - Returns 200 if ready, 503 if not (for K8s)
+
+# Admin command system — control the bridge via IRC PRIVMSG
+# WARNING: IRC authentication is inherently limited. Always configure hostmask
+#          for sensitive commands. nick-only auth is weak (anyone can steal nicks).
+# Disabled by default.
+admin:
+  enabled: false
+  command_prefix: "!"
+  accept_pm: true  # also accept commands via private message to the bot
+  # channels: channels where admin commands are accepted
+  channels:
+    - "#ops"
+  # allow_list: authorized IRC users (required when enabled)
+  allow_list:
+    - nick: "adminuser"
+      hostmask: "*@trusted.isp.net"  # optional glob; omit for nick-only (weaker)
+    # - nick: "localadmin"
+    #   # no hostmask: nick match alone grants access

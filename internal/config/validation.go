@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -76,6 +77,26 @@ func Validate(cfg *Config) error {
 	// Health validation
 	if cfg.Health.Enabled && (cfg.Health.Port <= 0 || cfg.Health.Port > 65535) {
 		return fmt.Errorf("health.port must be between 1 and 65535")
+	}
+
+	// Admin validation
+	if cfg.Admin.Enabled {
+		if len(cfg.Admin.AllowList) == 0 {
+			return fmt.Errorf("admin.allow_list must be non-empty when admin is enabled")
+		}
+		for i, entry := range cfg.Admin.AllowList {
+			if entry.Nick == "" {
+				return fmt.Errorf("admin.allow_list[%d].nick is required", i)
+			}
+			if entry.Hostmask != "" {
+				if _, err := path.Match(entry.Hostmask, ""); err != nil {
+					return fmt.Errorf("admin.allow_list[%d].hostmask is invalid: %w", i, err)
+				}
+			}
+		}
+		if len(cfg.Admin.Channels) == 0 && !cfg.Admin.AcceptPM {
+			return fmt.Errorf("admin must have at least one channel or accept_pm: true")
+		}
 	}
 
 	return nil
